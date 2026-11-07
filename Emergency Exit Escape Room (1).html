@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>مخرج طوارئ - لعبة الهروب الجماعية</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Google Fonts: Cairo & Tajawal -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <style>
+        * {
+            font-family: 'Cairo', 'Tajawal', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.8);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #b45309;
+            border-radius: 4px;
+        }
+
+        /* Atmospheric Room Visuals */
+        .room-bg {
+            background: radial-gradient(circle at center, #1e1b18 0%, #0d0b0a 100%);
+            box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.9);
+        }
+
+        .gold-border {
+            border: 2px solid #b45309;
+            box-shadow: 0 0 15px rgba(180, 83, 9, 0.3), inset 0 0 15px rgba(180, 83, 9, 0.2);
+        }
+
+        .brass-button {
+            background: linear-gradient(145deg, #d97706, #92400e);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        }
+
+        .brass-button:active {
+            transform: translateY(2px);
+            box-shadow: 0 1px 2px -1px rgba(0, 0, 0, 0.5), inset 0 2px 4px rgba(0, 0, 0, 0.4);
+        }
+
+        .digital-glow {
+            font-family: monospace;
+            text-shadow: 0 0 10px rgba(239, 68, 68, 0.8), 0 0 20px rgba(239, 68, 68, 0.4);
+        }
+
+        .green-glow {
+            text-shadow: 0 0 10px rgba(34, 197, 94, 0.8), 0 0 20px rgba(34, 197, 94, 0.4);
+        }
+
+        /* Pipe rotation animation */
+        .pipe-node {
+            transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* Pulsing Alert */
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .pulse-alarm {
+            animation: pulse-slow 1.5s infinite;
+        }
+
+        /* Vintage Paper Texture Overlay */
+        .paper-texture {
+            background-color: #fef3c7;
+            background-image: radial-gradient(#d97706 0.75px, transparent 0.75px), radial-gradient(#d97706 0.75px, #fef3c7 0.75px);
+            background-size: 30px 30px;
+            background-position: 0 0, 15px 15px;
+            opacity: 0.95;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-amber-100 min-h-screen flex flex-col justify-between overflow-x-hidden selection:bg-amber-600">
+
+    <!-- Audio Synth Manager (Web Audio API) -->
+    <script>
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+            }
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+            click() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(400, this.ctx.currentTime + 0.04);
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.04);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.04);
+            }
+            beep(success = true) {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = success ? 'triangle' : 'sawtooth';
+                osc.frequency.setValueAtTime(success ? 587.33 : 180, this.ctx.currentTime); // D5 or Low F
+                if (success) {
+                    osc.frequency.setValueAtTime(880, this.ctx.currentTime + 0.08); // A5
+                }
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + (success ? 0.25 : 0.4));
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + (success ? 0.25 : 0.4));
+            }
+            unlock() {
+                if (!this.ctx) return;
+                const notes = [523.25, 659.25, 783.99, 1046.50]; // C E G C
+                notes.forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(0, this.ctx.currentTime + idx * 0.06);
+                    gain.gain.linearRampToValueAtTime(0.2, this.ctx.currentTime + idx * 0.06 + 0.02);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + idx * 0.06 + 0.3);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(this.ctx.currentTime + idx * 0.06);
+                    osc.stop(this.ctx.currentTime + idx * 0.06 + 0.3);
+                });
+            }
+            pour() {
+                if (!this.ctx) return;
+                const bufferSize = this.ctx.sampleRate * 0.15;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 1000;
+                filter.Q.value = 3;
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+                noise.start();
+            }
+        }
+        const sound = new SoundFX();
+    </script>
+
+    <!-- HEADER / NAVIGATION / TIMER -->
+    <header class="bg-slate-900/90 border-b border-amber-900/40 p-3 sm:p-4 sticky top-0 z-40 backdrop-blur-md">
+        <div class="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-2">
+            <!-- Game Title -->
+            <div class="flex items-center gap-2">
+                <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-amber-900/60 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                    <i data-lucide="door-closed" class="w-5 h-5 sm:w-6 sm:h-6"></i>
+                </div>
+                <div>
+                    <h1 class="text-base sm:text-lg font-black text-amber-300 tracking-wide">مخرج طوارئ</h1>
+                    <p class="text-xs text-amber-600 font-semibold hidden sm:block">غرفة الهروب التعاونية</p>
+                </div>
+            </div>
+
+            <!-- Timer & Room Stage Indicator -->
+            <div class="flex items-center gap-3 bg-slate-950/80 px-3 py-1.5 rounded-xl border border-amber-900/50">
+                <div class="flex items-center gap-1.5 text-red-500 font-mono text-lg sm:text-2xl font-black digital-glow">
+                    <i data-lucide="timer" class="w-4 h-4 sm:w-5 sm:h-5 text-red-500 animate-pulse"></i>
+                    <span id="timer-display">45:00</span>
+                </div>
+                <div class="h-6 w-px bg-amber-900/50"></div>
+                <div class="text-xs sm:text-sm font-bold text-amber-400 flex items-center gap-1">
+                    <span>الغرفة:</span>
+                    <span id="current-room-name" class="text-amber-200">1 (المكتبة)</span>
+                </div>
+            </div>
+
+            <!-- Action Controls -->
+            <div class="flex items-center gap-2">
+                <button onclick="toggleHintModal()" class="px-3 py-1.5 rounded-lg bg-amber-950/80 hover:bg-amber-900 border border-amber-700/50 text-amber-300 text-xs sm:text-sm font-semibold flex items-center gap-1 transition">
+                    <i data-lucide="lightbulb" class="w-4 h-4 text-amber-400"></i>
+                    <span>مساعدة</span>
+                </button>
+                <button onclick="toggleRoleSwitch()" id="role-toggle-btn" class="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs sm:text-sm font-bold flex items-center gap-1 transition shadow-md">
+                    <i data-lucide="users" class="w-4 h-4"></i>
+                    <span id="role-toggle-text">تبديل المنظور (لاعب 1)</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN GAME CONTAINERS -->
+    <main class="flex-grow flex flex-col items-center justify-center p-2 sm:p-6 max-w-5xl mx-auto w-full">
+        
+        <!-- ROOM CONTENT WRAPPER -->
+        <div id="game-container" class="w-full room-bg rounded-2xl gold-border p-3 sm:p-6 min-h-[520px] flex flex-col justify-between relative overflow-hidden">
+            
+            <!-- Perspective Indicator Bar -->
+            <div id="perspective-bar" class="w-full mb-4 px-4 py-2 rounded-lg bg-amber-950/60 border border-amber-700/30 flex items-center justify-between text-xs sm:text-sm">
+                <div class="flex items-center gap-2 text-amber-400">
+                    <i data-lucide="eye" class="w-4 h-4"></i>
+                    <span class="font-bold">أنت تعرض الآن:</span>
+                    <span id="player-view-title" class="text-amber-100 font-extrabold underline">اللاعب 1 (الملاحظ والأدلة)</span>
+                </div>
+                <div class="text-amber-500/80 text-xs hidden sm:block">
+                    💡 اتكلموا مع بعض! اللاعب 1 يشوف الأدلة واللاعب 2 ينفذ الأقفال.
+                </div>
+            </div>
+
+            <!-- ======================================================== -->
+            <!-- ROOM 1: THE SECRET STUDY (مكتبة الأسرار) -->
+            <!-- ======================================================== -->
+            <div id="room-1" class="room-screen flex-grow flex flex-col justify-center">
+                <!-- PLAYER 1 VIEW: CLUES & BOOKS -->
+                <div id="room1-p1" class="player-view space-y-4">
+                    <div class="text-center mb-2">
+                        <h2 class="text-lg sm:text-xl font-bold text-amber-300">مكتبة الباشا القديمة - غرفة الأدلة</h2>
+                        <p class="text-xs sm:text-sm text-amber-500">اقرأ البيانات المعروضة بعناية وأملاها لصاحبك اللي ماسك الأقفال!</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Clock Clue Card -->
+                        <div class="bg-slate-900/80 p-4 rounded-xl border border-amber-800/40 flex flex-col items-center text-center">
+                            <h3 class="text-xs font-bold text-amber-400 mb-2 flex items-center gap-1">
+                                <i data-lucide="clock" class="w-4 h-4"></i> ساعة الحائط الأثرية
+                            </h3>
+                            <!-- Antique SVG Clock -->
+                            <div class="w-28 h-28 relative flex items-center justify-center my-2">
+                                <svg viewBox="0 0 100 100" class="w-full h-full drop-shadow-md">
+                                    <circle cx="50" cy="50" r="45" fill="#292524" stroke="#d97706" stroke-width="4"/>
+                                    <!-- Clock Face Ticks -->
+                                    <line x1="50" y1="10" x2="50" y2="15" stroke="#fef3c7" stroke-width="2"/>
+                                    <line x1="90" y1="50" x2="85" y2="50" stroke="#fef3c7" stroke-width="2"/>
+                                    <line x1="50" y1="90" x2="50" y2="85" stroke="#fef3c7" stroke-width="2"/>
+                                    <line x1="10" y1="50" x2="15" y2="50" stroke="#fef3c7" stroke-width="2"/>
+                                    <!-- Hands showing 07:45 -->
+                                    <!-- Hour hand pointing to 7.5 -->
+                                    <line x1="50" y1="50" x2="25" y2="65" stroke="#f59e0b" stroke-width="3.5" stroke-linecap="round"/>
+                                    <!-- Minute hand pointing to 9 (45 mins) -->
+                                    <line x1="50" y1="50" x2="15" y2="50" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round"/>
+                                    <circle cx="50" cy="50" r="3" fill="#fef3c7"/>
+                                </svg>
+                            </div>
+                            <p class="text-xs text-amber-300/80 font-mono">الساعة متوقفة تماماً عن الحركة!</p>
+                        </div>
+
+                        <!-- Antique Note / Cipher -->
+                        <div class="paper-texture p-4 rounded-xl text-slate-900 border border-amber-700 shadow-lg flex flex-col justify-between">
+                            <div>
+                                <div class="flex justify-between items-center border-b border-amber-900/30 pb-2 mb-2">
+                                    <span class="font-bold text-xs uppercase tracking-wider text-amber-900">ملاحظات مذكرات الباشا</span>
+                                    <i data-lucide="scroll" class="w-4 h-4 text-amber-900"></i>
+                                </div>
+                                <p class="text-xs sm:text-sm leading-relaxed mb-3 font-semibold text-amber-950">
+                                    "تاريخ ميلادي هو مفتاح الأمان للدرج الأول (عام 1948). أما لفك شفرة الألوان الخماسية: فالأحمر يمثل الرقم 3، والأزرق هو 8، والأصفر هو 1، والأخضر يعادل 5."
+                                </p>
+                            </div>
+                            <div class="bg-amber-900/10 p-2 rounded border border-amber-800/20 text-xs font-mono text-amber-900 font-bold">
+                                💡 ملحوظة: ترتيب فتح القفل الملون يعتمد على عقارب الساعة!
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PLAYER 2 VIEW: LOCK & KEYPAD -->
+                <div id="room1-p2" class="player-view space-y-4 hidden">
+                    <div class="text-center mb-2">
+                        <h2 class="text-lg sm:text-xl font-bold text-amber-300">لوحة التحكم والأقوافل - الدرج الرئيسي</h2>
+                        <p class="text-xs sm:text-sm text-amber-500">اطلب الشفرات من صاحباك وادخل الرقم السر للعبور للغرفة التالية!</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl mx-auto">
+                        <!-- Keypad Lock Box -->
+                        <div class="bg-slate-900 p-4 rounded-xl border border-amber-700/60 flex flex-col items-center">
+                            <span class="text-xs font-bold text-amber-400 mb-2">القفل الرقمي الأول (4 أرقام)</span>
+                            <!-- Screen Display -->
+                            <div class="w-full bg-slate-950 border-2 border-amber-900 rounded-lg p-2 mb-3 text-center">
+                                <div id="keypad-display" class="font-mono text-2xl font-black text-amber-400 tracking-widest min-h-[32px]">----</div>
+                            </div>
+                            <!-- Numpad -->
+                            <div class="grid grid-cols-3 gap-2 w-full max-w-[200px]">
+                                <script>
+                                    for(let i=1; i<=9; i++) {
+                                        document.write(`<button onclick="pressKeypad('${i}')" class="brass-button text-amber-100 font-bold p-2.5 rounded-lg text-lg">${i}</button>`);
+                                    }
+                                </script>
+                                <button onclick="clearKeypad()" class="bg-red-950 hover:bg-red-900 text-red-300 font-bold p-2.5 rounded-lg text-sm border border-red-800">مسح</button>
+                                <button onclick="pressKeypad('0')" class="brass-button text-amber-100 font-bold p-2.5 rounded-lg text-lg">0</button>
+                                <button onclick="submitKeypad()" class="bg-emerald-700 hover:bg-emerald-600 text-white font-bold p-2.5 rounded-lg text-sm border border-emerald-500">تأكيد</button>
+                            </div>
+                        </div>
+
+                        <!-- Color Wire Lock Box -->
+                        <div class="bg-slate-900 p-4 rounded-xl border border-amber-700/60 flex flex-col justify-between items-center text-center">
+                            <div>
+                                <span class="text-xs font-bold text-amber-400 mb-1 block">القفل الملون الثانوي</span>
+                                <p class="text-xs text-amber-500/90 mb-3">حدد الألوان المقابلة للرقمين اللذين تشير إليهما عقارب الساعة (الساعة ثم الدقائق):</p>
+                            </div>
+
+                            <div class="flex items-center gap-3 my-2">
+                                <!-- Color Selector 1 -->
+                                <button onclick="rotateColor(1)" id="color-btn-1" class="w-14 h-14 rounded-full bg-red-600 border-4 border-amber-400/50 shadow-lg flex items-center justify-center font-bold text-white text-xs">
+                                    أحمر
+                                </button>
+                                <span class="text-amber-500 font-bold text-xl">+</span>
+                                <!-- Color Selector 2 -->
+                                <button onclick="rotateColor(2)" id="color-btn-2" class="w-14 h-14 rounded-full bg-blue-600 border-4 border-amber-400/50 shadow-lg flex items-center justify-center font-bold text-white text-xs">
+                                    أزرق
+                                </button>
+                            </div>
+
+                            <button onclick="submitColorLock()" class="w-full mt-3 py-2 bg-amber-700 hover:bg-amber-600 text-slate-950 font-bold rounded-lg text-sm transition">
+                                فتح أقفال الغرفة الأولية
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ======================================================== -->
+            <!-- ROOM 2: THE ALCHEMIST LAB (مختبر الأسرار والكيمياء) -->
+            <!-- ======================================================== -->
+            <div id="room-2" class="room-screen flex-grow flex-col justify-center hidden">
+                <!-- PLAYER 1 VIEW: FORMULA RECIPE -->
+                <div id="room2-p1" class="player-view space-y-4">
+                    <div class="text-center mb-2">
+                        <h2 class="text-lg sm:text-xl font-bold text-amber-300">المختبر السري - كتالوج التركيبة</h2>
+                        <p class="text-xs sm:text-sm text-amber-500">إليك الإرشادات الدقيقة لإعداد المحلول المذيب للأقفال!</p>
+                    </div>
+
+                    <div class="paper-texture p-4 sm:p-6 rounded-xl text-slate-900 max-w-2xl mx-auto border border-amber-800 shadow-xl">
+                        <div class="flex items-center justify-between border-b border-amber-900/30 pb-2 mb-3">
+                            <h3 class="font-extrabold text-sm sm:text-base text-amber-950">وصفة المحلول المذيب (كود الحمض)</h3>
+                            <i data-lucide="flask-conical" class="w-5 h-5 text-amber-900"></i>
+                        </div>
+                        <ul class="text-xs sm:text-sm space-y-2.5 font-bold text-amber-900 leading-relaxed">
+                            <li class="flex items-start gap-2">
+                                <span class="bg-amber-900 text-amber-100 rounded-full w-5 h-5 flex items-center justify-center text-xs shrink-0 mt-0.5">1</span>
+                                <span>يتم سكب <strong>3 قطرات</strong> من المركب الأزرق (حمض الهيدرا).</span>
+                            </li>
+                            <li class="flex items-start gap-2">
+                                <span class="bg-amber-900 text-amber-100 rounded-full w-5 h-5 flex items-center justify-center text-xs shrink-0 mt-0.5">2</span>
+                                <span>يتم سكب <strong>2 قطرة</strong> من المركب الأخضر (مسحوق الزيتون).</span>
+                            </li>
+                            <li class="flex items-start gap-2">
+                                <span class="bg-amber-900 text-amber-100 rounded-full w-5 h-5 flex items-center justify-center text-xs shrink-0 mt-0.5">3</span>
+                                <span>وأخيراً <strong>4 قطرات</strong> من المركب الأرجواني (سائل الكبريت).</span>
+                            </li>
+                        </ul>
+                        <div class="mt-4 p-2.5 bg-red-900/10 rounded border border-red-900/30 text-xs text-red-950 font-bold">
+                            ⚠️ تحذير: أي زيادات أو خطأ في المجموع الكلي (المطلوب 9 قطرات بالضبط) سيتسبب في انفجار الوعاء وإعادة التجربة!
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PLAYER 2 VIEW: CHEMICAL MIXER -->
+                <div id="room2-p2" class="player-view space-y-4 hidden">
+                    <div class="text-center mb-2">
+                        <h2 class="text-lg sm:text-xl font-bold text-amber-300">منضدة خلط المركبات الكيميائية</h2>
+                        <p class="text-xs sm:text-sm text-amber-500">اضغط على الأنابيب لسكب القطرات بالعدد المطلوب في الوعاء الرئيسي!</p>
+                    </div>
+
+                    <div class="bg-slate-900 p-4 sm:p-6 rounded-xl border border-amber-700/60 max-w-2xl mx-auto flex flex-col items-center">
+                        <!-- Beaker Visualizer -->
+                        <div class="w-32 h-44 border-4 border-t-0 border-slate-600 rounded-b-3xl relative bg-slate-950/80 overflow-hidden flex flex-col justify-end p-1 mb-4 shadow-inner">
+                            <div id="beaker-liquid" class="w-full bg-gradient-to-t from-emerald-600 to-teal-400 rounded-b-2xl transition-all duration-300" style="height: 0%;"></div>
+                            <!-- Beaker Measurement Lines -->
+                            <div class="absolute inset-0 flex flex-col justify-between p-2 pointer-events-none opacity-40">
+                                <div class="border-b border-white text-[9px] text-white">9 drops</div>
+                                <div class="border-b border-white text-[9px] text-white">6 drops</div>
+                                <div class="border-b border-white text-[9px] text-white">3 drops</div>
+                            </div>
+                        </div>
+
+                        <!-- Current Recipe Count Display -->
+                        <div class="flex items-center gap-4 text-xs font-mono font-bold mb-4 bg-slate-950 px-4 py-2 rounded-lg border border-slate-800">
+                            <span class="text-blue-400">أزرق: <span id="count-blue">0</span></span>
+                            <span class="text-emerald-400">أخضر: <span id="count-green">0</span></span>
+                            <span class="text-purple-400">أرجواني: <span id="count-purple">0</span></span>
+                            <span class="text-amber-300 border-r border-slate-700 pr-3">المجموع: <span id="count-total">0</span>/9</span>
+                        </div>
+
+                        <!-- Chemical Dropper Buttons -->
+                        <div class="grid grid-cols-3 gap-3 w-full max-w-md mb-4">
+                            <button onclick="pourChemical('blue')" class="bg-blue-900 hover:bg-blue-800 border border-blue-500 text-blue-200 font-bold p-3 rounded-xl flex flex-col items-center gap-1 transition">
+                                <i data-lucide="droplet" class="w-5 h-5 text-blue-400"></i>
+                                <span class="text-xs">مركب أزرق</span>
+                            </button>
+                            <button onclick="pourChemical('green')" class="bg-emerald-900 hover:bg-emerald-800 border border-emerald-500 text-emerald-200 font-bold p-3 rounded-xl flex flex-col items-center gap-1 transition">
+                                <i data-lucide="droplet" class="w-5 h-5 text-emerald-400"></i>
+                                <span class="text-xs">مركب أخضر</span>
+                            </button>
+                            <button onclick="pourChemical('purple')" class="bg-purple-900 hover:bg-purple-800 border border-purple-500 text-purple-200 font-bold p-3 rounded-xl flex flex-col items-center gap-1 transition">
+                                <i data-lucide="droplet" class="w-5 h-5 text-purple-400"></i>
+                                <span class="text-xs">مركب أرجواني</span>
+                            </button>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="flex gap-2 w-full max-w-md">
+                            <button onclick="resetLab()" class="w-1/3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold rounded-lg transition">تفريغ الوعاء</button>
+                            <button onclick="submitLabMix()" class="w-2/3 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-black rounded-lg transition">صب الحمض وفتح الباب</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ======================================================== -->
+            <!-- ROOM 3: THE VAULT & MAIN EXIT (غرفة الماكينات والمخرج) -->
+            <!-- ======================================================== -->
+            <div id="room-3" class="room-screen flex-grow flex-col justify-center hidden">
+                <!-- PLAYER 1 VIEW: CIRCUIT DIAGRAM -->
+                <div id="room3-p1" class="player-view space-y-4">
+                    <div class="text-center mb-2">
+                        <h2 class="text-lg sm:text-xl font-bold text-amber-300">خريطة توصيل تيار المخرج النهائي</h2>
+                        <p class="text-xs sm:text-sm text-amber-500">املي على صاحبك اتجاهات الأسلاك الصحيحة ليتم إضاءة المخرج!</p>
+                    </div>
+
+                    <div class="bg-slate-900 p-4 sm:p-6 rounded-xl border border-amber-700/60 max-w-xl mx-auto">
+                        <h3 class="text-xs font-bold text-amber-400 mb-3 text-center">المخطط الهندسي (شبكة 3×3)</h3>
+                        <!-- Diagram Grid Representation -->
+                        <div class="grid grid-cols-3 gap-2 bg-slate-950 p-4 rounded-xl border border-slate-800 text-center font-mono text-xs">
+                            <div class="p-3 bg-amber-950/40 border border-amber-800/40 rounded text-amber-300">1: زاوية └ (يمين وأعلى)</div>
+                            <div class="p-3 bg-amber-950/40 border border-amber-800/40 rounded text-amber-300">2: خط ─ (أفقي)</div>
+                            <div class="p-3 bg-amber-950/40 border border-amber-800/40 rounded text-amber-300">3: زاوية ┐ (يسار وأسفل)</div>
+                            <div class="p-3 bg-amber-950/40 border border-amber-800/40 rounded text-amber-300">4: خط │ (رأسي)</div>
+                            <div class="p-3 bg-amber-950/40 border border-amber-800/40 rounded text-amber-300">5: زاوية ┌ (يمين وأسفل)</div>
+                            <div class="p-3 bg-amber-950/40 border border-amber-800/40 rounded text-amber-300">6: خط │ (رأسي)</div>
+                            <div class="p-3 bg-amber-950/40 border border-amber-800/40 rounded text-amber-300">7: زاوية └ (يمين وأعلى)</div>
+                            <div class="p-3 bg-amber-950/40 border border-amber-800/40 rounded text-amber-300">8: خط ─ (أفقي)</div>
+                            <div class="p-3 bg-amber-950/40 border border-amber-800/40 rounded text-amber-300">9: زاوية ┘ (يسار وأعلى)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PLAYER 2 VIEW: INTERACTIVE CIRCUIT PUZZLE -->
+                <div id="room3-p2" class="player-view space-y-4 hidden">
+                    <div class="text-center mb-2">
+                        <h2 class="text-lg sm:text-xl font-bold text-amber-300">لوحة توزيع التيار الإلكتروني</h2>
+                        <p class="text-xs sm:text-sm text-amber-500">اضغط على الوصلات لتدويرها حتى يكتمل اتصال التيار من البداية للمخرج!</p>
+                    </div>
+
+                    <div class="bg-slate-900 p-4 rounded-xl border border-amber-700/60 max-w-md mx-auto flex flex-col items-center">
+                        <!-- Pipe Circuit Grid (3x3) -->
+                        <div id="pipe-grid" class="grid grid-cols-3 gap-2 bg-slate-950 p-4 rounded-2xl border-2 border-amber-900 shadow-2xl mb-4">
+                            <!-- Pipe nodes populated by JS -->
+                        </div>
+
+                        <!-- Circuit Test Button -->
+                        <button onclick="checkCircuitConnection()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black rounded-xl text-sm transition shadow-lg flex items-center justify-center gap-2">
+                            <i data-lucide="zap" class="w-5 h-5"></i>
+                            <span>تشغيل التيار وفتح مخرج الطوارئ</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Quick Switch Helper -->
+            <div class="mt-4 pt-3 border-t border-amber-900/30 flex justify-between items-center text-xs text-amber-500">
+                <span>اسم اللعبة: مخرج طوارئ</span>
+                <span id="room-step-indicator" class="font-bold">المرحلة 1 من 3</span>
+            </div>
+        </div>
+    </main>
+
+    <!-- HINT MODAL SYSTEM -->
+    <div id="hint-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-slate-900 border-2 border-amber-600 rounded-2xl p-5 max-w-md w-full shadow-2xl text-right">
+            <div class="flex justify-between items-center border-b border-amber-800/40 pb-3 mb-3">
+                <h3 class="text-base font-bold text-amber-300 flex items-center gap-2">
+                    <i data-lucide="help-circle" class="w-5 h-5 text-amber-400"></i> تلميح اللغز الحالي
+                </h3>
+                <button onclick="toggleHintModal()" class="text-amber-500 hover:text-amber-300"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <p id="hint-text" class="text-xs sm:text-sm text-amber-200 leading-relaxed mb-4">
+                تلميح الغرفة الأولى: كود الرقم السر هو سنة الميلاد المذكورة بالكتالوج (1948). بالنسبة للألوان: انظر لوقت الساعة (07:45)، عقرب الساعات يشيير لـ 7 وعقرب الدقائق لـ 9.
+            </p>
+            <button onclick="toggleHintModal()" class="w-full py-2 bg-amber-700 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-lg">إغلاق المساعدة</button>
+        </div>
+    </div>
+
+    <!-- VICTORY OVERLAY SCREEN -->
+    <div id="victory-screen" class="fixed inset-0 bg-slate-950/95 z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-slate-900 border-2 border-amber-500 rounded-3xl p-6 sm:p-8 max-w-lg w-full text-center shadow-2xl gold-border">
+            <div class="w-20 h-20 bg-amber-500/20 border-2 border-amber-400 rounded-full flex items-center justify-center mx-auto mb-4 text-amber-400 animate-bounce">
+                <i data-lucide="trophy" class="w-10 h-10"></i>
+            </div>
+            <h2 class="text-2xl sm:text-3xl font-black text-amber-300 mb-2">عاش يا أبطال! تم الهروب بنجاح 🎉</h2>
+            <p class="text-xs sm:text-sm text-amber-400 mb-6">قدرتم تحلوا الألغاز وتفتحوا جميع الأبواب قبل فوات الأوان!</p>
+            
+            <div class="bg-slate-950 p-4 rounded-xl border border-amber-900/60 mb-6 flex justify-around text-xs sm:text-sm">
+                <div>
+                    <span class="text-amber-600 block mb-1">الوقت المتبقي</span>
+                    <span id="final-time-left" class="font-mono text-lg font-bold text-emerald-400">24:15</span>
+                </div>
+                <div class="border-r border-amber-900/50"></div>
+                <div>
+                    <span class="text-amber-600 block mb-1">الغرف المكتملة</span>
+                    <span class="font-mono text-lg font-bold text-amber-300">3 / 3</span>
+                </div>
+            </div>
+
+            <button onclick="restartGame()" class="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-sm transition shadow-lg">
+                إعادة اللعب من جديد
+            </button>
+        </div>
+    </div>
+
+    <!-- GAME ENGINE LOGIC JS -->
+    <script>
+        // State Management
+        let currentRoom = 1;
+        let currentRole = 1; // 1 = Player 1 (Reader), 2 = Player 2 (Keypad/Interactive)
+        let timerSeconds = 45 * 60; // 45 minutes
+        let timerInterval = null;
+
+        // Room 1 State
+        let keypadInput = "";
+        const correctKeypadCode = "1948";
+        const colors = [
+            { name: "أحمر", bg: "bg-red-600", val: 3 },
+            { name: "أزرق", bg: "bg-blue-600", val: 8 },
+            { name: "أصفر", bg: "bg-yellow-500", val: 1 },
+            { name: "أخضر", bg: "bg-emerald-600", val: 5 }
+        ];
+        let colorIdx1 = 0; // Red
+        let colorIdx2 = 1; // Blue
+        let room1KeypadPassed = false;
+
+        // Room 2 State
+        let chemBlue = 0;
+        let chemGreen = 0;
+        let chemPurple = 0;
+
+        // Room 3 State (Pipe Rotation Angles)
+        // Correct angles in degrees: [90, 0, 180, 0, 90, 0, 90, 0, 270]
+        const targetPipeAngles = [90, 0, 180, 0, 90, 0, 90, 0, 270];
+        let currentPipeAngles = [0, 90, 0, 90, 0, 90, 0, 90, 0];
+
+        // Hints Array per room
+        const hints = {
+            1: "تلميح الغرفة 1: كود الرقم السر هو سنة الميلاد المذكورة بالكتالوج (1948). بالنسبة للألوان: انظر لوقت الساعة (07:45)، عقرب الساعات يشيير لـ 7 وعقرب الدقائق لـ 9.",
+            2: "تلميح الغرفة 2: اتصل باللاعب 1 ليقرأ لك عدد القطرات المطلوبة بالضبط! (3 أزرق، 2 أخضر، 4 أرجواني).",
+            3: "تلميح الغرفة 3: اللاعب 1 يرى شكل الوصلات المطلوبة بالمخطط. طابق كل وصلة حتى يكتمل المسار الكهربائي."
+        };
+
+        // Initialize App on DOM Load
+        window.onload = function() {
+            lucide.createIcons();
+            startTimer();
+            renderPipeGrid();
+            
+            // Add click listener to initialize Web Audio on user gesture
+            document.body.addEventListener('click', () => sound.init(), { once: true });
+        };
+
+        // Timer Controller
+        function startTimer() {
+            clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if (timerSeconds > 0) {
+                    timerSeconds--;
+                    const mins = Math.floor(timerSeconds / 60);
+                    const secs = timerSeconds % 60;
+                    document.getElementById('timer-display').innerText = 
+                        `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                } else {
+                    clearInterval(timerInterval);
+                    alert("انتهى الوقت! تعثرت الفرقة في الهروب!");
+                    restartGame();
+                }
+            }, 1000);
+        }
+
+        // Toggle Perspective (Player 1 / Player 2)
+        function toggleRoleSwitch() {
+            sound.click();
+            currentRole = currentRole === 1 ? 2 : 1;
+            
+            const roleBtnText = document.getElementById('role-toggle-text');
+            const viewTitle = document.getElementById('player-view-title');
+
+            if (currentRole === 1) {
+                roleBtnText.innerText = "تبديل المنظور (لاعب 1)";
+                viewTitle.innerText = "اللاعب 1 (الملاحظ والأدلة)";
+            } else {
+                roleBtnText.innerText = "تبديل المنظور (لاعب 2)";
+                viewTitle.innerText = "اللاعب 2 (اللوحة والأقفال)";
+            }
+
+            updateViewVisibility();
+        }
+
+        function updateViewVisibility() {
+            // Hide all views first
+            document.querySelectorAll('.player-view').forEach(el => el.classList.add('hidden'));
+
+            // Show active view based on room & role
+            const activeId = `room${currentRoom}-p${currentRole}`;
+            const activeEl = document.getElementById(activeId);
+            if (activeEl) {
+                activeEl.classList.remove('hidden');
+            }
+        }
+
+        // ==========================================
+        // ROOM 1 LOGIC
+        // ==========================================
+        function pressKeypad(num) {
+            sound.click();
+            if (keypadInput.length < 4) {
+                keypadInput += num;
+                document.getElementById('keypad-display').innerText = keypadInput.padEnd(4, '-');
+            }
+        }
+
+        function clearKeypad() {
+            sound.click();
+            keypadInput = "";
+            document.getElementById('keypad-display').innerText = "----";
+        }
+
+        function submitKeypad() {
+            if (keypadInput === correctKeypadCode) {
+                sound.unlock();
+                room1KeypadPassed = true;
+                alert("تم فك الرقم السري الصحيح! يتبقى القفل الملون الثانوي.");
+            } else {
+                sound.beep(false);
+                alert("رمز خطأ! حاول مجدداً أو اطلب التلميح.");
+                clearKeypad();
+            }
+        }
+
+        function rotateColor(btnNum) {
+            sound.click();
+            if (btnNum === 1) {
+                colorIdx1 = (colorIdx1 + 1) % colors.length;
+                const btn = document.getElementById('color-btn-1');
+                btn.className = `w-14 h-14 rounded-full ${colors[colorIdx1].bg} border-4 border-amber-400/50 shadow-lg flex items-center justify-center font-bold text-white text-xs`;
+                btn.innerText = colors[colorIdx1].name;
+            } else {
+                colorIdx2 = (colorIdx2 + 1) % colors.length;
+                const btn = document.getElementById('color-btn-2');
+                btn.className = `w-14 h-14 rounded-full ${colors[colorIdx2].bg} border-4 border-amber-400/50 shadow-lg flex items-center justify-center font-bold text-white text-xs`;
+                btn.innerText = colors[colorIdx2].name;
+            }
+        }
+
+        function submitColorLock() {
+            if (!room1KeypadPassed) {
+                sound.beep(false);
+                alert("قم بفك الرقم السري الأول أولاً!");
+                return;
+            }
+
+            // Correct combination: Hour hand = 7 -> Red (3), Minute hand = 9 -> Blue (8) -> Red + Blue
+            if (colorIdx1 === 0 && colorIdx2 === 1) {
+                sound.unlock();
+                advanceToRoom(2);
+            } else {
+                sound.beep(false);
+                alert("تركيبة الألوان غير صحيحة!");
+            }
+        }
+
+        // ==========================================
+        // ROOM 2 LOGIC
+        // ==========================================
+        function pourChemical(color) {
+            sound.pour();
+            if (color === 'blue') chemBlue++;
+            if (color === 'green') chemGreen++;
+            if (color === 'purple') chemPurple++;
+
+            const total = chemBlue + chemGreen + chemPurple;
+
+            document.getElementById('count-blue').innerText = chemBlue;
+            document.getElementById('count-green').innerText = chemGreen;
+            document.getElementById('count-purple').innerText = chemPurple;
+            document.getElementById('count-total').innerText = total;
+
+            const heightPercent = Math.min((total / 9) * 100, 100);
+            document.getElementById('beaker-liquid').style.height = `${heightPercent}%`;
+        }
+
+        function resetLab() {
+            sound.click();
+            chemBlue = 0;
+            chemGreen = 0;
+            chemPurple = 0;
+            document.getElementById('count-blue').innerText = 0;
+            document.getElementById('count-green').innerText = 0;
+            document.getElementById('count-purple').innerText = 0;
+            document.getElementById('count-total').innerText = 0;
+            document.getElementById('beaker-liquid').style.height = '0%';
+        }
+
+        function submitLabMix() {
+            if (chemBlue === 3 && chemGreen === 2 && chemPurple === 4) {
+                sound.unlock();
+                advanceToRoom(3);
+            } else {
+                sound.beep(false);
+                alert("تركيبة خاطئة! تفاعل السائل بشكل خاطئ، تم تفريغ الوعاء!");
+                resetLab();
+            }
+        }
+
+        // ==========================================
+        // ROOM 3 LOGIC (Pipes Grid)
+        // ==========================================
+        function renderPipeGrid() {
+            const grid = document.getElementById('pipe-grid');
+            grid.innerHTML = '';
+            
+            // 3x3 Pipe SVG Icons
+            const pipeIcons = [
+                'corner-down-right', 'minus', 'corner-down-left',
+                'line-vertical', 'corner-down-right', 'line-vertical',
+                'corner-up-right', 'minus', 'corner-up-left'
+            ];
+
+            currentPipeAngles.forEach((angle, idx) => {
+                const node = document.createElement('button');
+                node.className = "w-16 h-16 sm:w-20 sm:h-20 bg-slate-900 border border-amber-800/60 rounded-xl flex items-center justify-center text-amber-400 hover:bg-slate-800 transition";
+                node.onclick = () => rotatePipe(idx);
+
+                node.innerHTML = `
+                    <div class="pipe-node flex items-center justify-center w-full h-full" style="transform: rotate(${angle}deg)">
+                        <i data-lucide="${pipeIcons[idx]}" class="w-8 h-8 sm:w-10 sm:h-10 text-amber-400"></i>
+                    </div>
+                `;
+                grid.appendChild(node);
+            });
+            lucide.createIcons();
+        }
+
+        function rotatePipe(idx) {
+            sound.click();
+            currentPipeAngles[idx] = (currentPipeAngles[idx] + 90) % 360;
+            renderPipeGrid();
+        }
+
+        function checkCircuitConnection() {
+            let isCorrect = true;
+            for (let i = 0; i < currentPipeAngles.length; i++) {
+                if (currentPipeAngles[i] !== targetPipeAngles[i]) {
+                    isCorrect = false;
+                    break;
+                }
+            }
+
+            if (isCorrect) {
+                sound.unlock();
+                showVictory();
+            } else {
+                sound.beep(false);
+                alert("التيار الكهربائي لم يكتمل بعد! راجع الاتجاهات بالمخطط.");
+            }
+        }
+
+        // ==========================================
+        // ROOM NAVIGATION & GENERAL
+        // ==========================================
+        function advanceToRoom(roomNum) {
+            currentRoom = roomNum;
+            
+            // Hide old room screen, show new
+            document.querySelectorAll('.room-screen').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`room-${roomNum}`).classList.remove('hidden');
+
+            // Update Header Info
+            const roomNames = { 1: "1 (المكتبة)", 2: "2 (المختبر)", 3: "3 (المخرج)" };
+            document.getElementById('current-room-name').innerText = roomNames[roomNum];
+            document.getElementById('room-step-indicator').innerText = `المرحلة ${roomNum} من 3`;
+            document.getElementById('hint-text').innerText = hints[roomNum];
+
+            updateViewVisibility();
+            alert(`ممتاز! نجحتم في تجاوز الغرفة ${roomNum - 1}. مرحباً بكم في الغرفة رقم ${roomNum}!`);
+        }
+
+        function toggleHintModal() {
+            sound.click();
+            const modal = document.getElementById('hint-modal');
+            modal.classList.toggle('hidden');
+        }
+
+        function showVictory() {
+            clearInterval(timerInterval);
+            const mins = Math.floor(timerSeconds / 60);
+            const secs = timerSeconds % 60;
+            document.getElementById('final-time-left').innerText = 
+                `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            document.getElementById('victory-screen').classList.remove('hidden');
+        }
+
+        function restartGame() {
+            window.location.reload();
+        }
+    </script>
+</body>
+</html>
